@@ -1,0 +1,814 @@
+---
+title: "Data 602 Project - Zulihumaer Hailaiti, Maciej Pecak, Ewa Rambally"
+Subtitle: Homeless shelter occupancy in Edmonton and Calgary
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+The purpose of this project is to analyse selected aspects o shelter occupancy in Edmonton and Calgary. 
+In the first part of the project we are presenting the occupancy rate per 100,000 city residents (density of occupancy rate) and compare means of such rates for Edmonton and Calgary in 2021. We present visual data representation in the form of box-plots and histograms, finalizing it with two statistical tests testing the equality of mean occupancy rates for Edmonton and Calgary in 2021,  
+Based on reported population in Calgary and Edmonton we determined the daily admission rate to homeless shelters in each city per 100,000 residents. The reason for such transformation is  determination of “density” of homelessness, rather than determination of its magnitude, in our opinion a better measure of homelessness situation in a location.
+
+In the second part we are concerned with the Calgary's occupancy rates in relation to winter weather conditions. We consider the minimal night temperatures as the independent variable and the admission rate per 100,000 residents as dependent variable. The analysis involves correlation analysis and linear regression. The comparison of four different winter seasons is conducted.
+
+Analysis of homeless shelter admission rates can help determine the projected required capacity.
+Subsequently, based on reported population in Calgary and Edmonton we determined the daily admission rate to homeless shelters in each city per 100,000 residents. The reason for such transformation is  determination of “density” of homelessness, rather than determination of its magnitude, in our opinion a better measure of homelessness situation in a location.
+
+The data used in this analysis comes from the Government of Alberta publicly available datasets:
+Emergency Shelters Occupancy - https://open.alberta.ca/opendata/funded-emergency-shelters-daily-occupancy-ab,
+Weather Data - https://acis.alberta.ca/acis/township-data-viewer.jsp.
+
+
+
+## 1. Comparative analysis of daily shelter admission rates per 100,000 residents for Calgary and Edmonton
+### Data collection, preparation, and analysis
+
+It is hypothesized that the daily occupancy rates of homeless shelters per 100k residents are on average the same in both, Calgary and Edmonton.
+
+```{r}
+library("mosaic")
+library("ggplot2")
+library("patchwork")
+```
+Raw data:
+The original data are saved in csv file. The data span from April 1, 2013 to June 30, 2022. It contains data on occupancy and overnight admissions grouped by multiple cities and shelters per day.
+
+```{r}
+shelter.df <- read.csv("data/shelter_data.csv")
+head(shelter.df)
+```
+
+```{r}
+tail(shelter.df)
+```
+
+For the purpose of our investigation we chose data for the year 2021. We were interested in daily admission rates per 100,000 city residents.
+ 
+Data transformations.
+We conducted the following data wrangling:
+1. selection by cities (Calgary and Edmonton)
+2. grouping by day and City, 
+3. determining the aggregates by day in each city for shelters’ total capacity and shelter’s total admissions per day in each city,
+4. determining  the capacity and admission rates per 100,000 residents, and finally 
+5. calculating daily occupancy rate per 100,000 city residents for each of the two cities.
+
+
+```{r}
+shelter.df <- shelter.df[(shelter.df$City %in% c("Edmonton", "Calgary")) & shelter.df$YEAR == 2021,] #choosing cities and year rows#
+shelter.df <- shelter.df[!is.na(shelter.df$Capacity), ] #removing NA values
+shelter.df <- shelter.df[shelter.df$Capacity > 0, ] #choosing shelters with positive capacity
+shelter.df$DAY <- format(as.Date(shelter.df$Date, format="%m/%d/%Y"), format = "%d")#creating the day column, yrar and month were provided
+head(shelter.df)
+```
+
+
+```{r}
+populations <- c(1306780, 1010899)
+cities <- c("Calgary", "Edmonton") #adding population colmn for both calgary and Edmonton - population is assumed to be constant
+population.df <- data.frame(City = cities, population = populations)
+```
+
+
+```{r}
+shelter.capacity <- shelter.df %>% group_by(MONTH, DAY, City)
+shelter.capacity <- shelter.capacity %>% summarize(summed_by_day_capacity = sum(Capacity)) #total capacity each day in each city
+test.df<-shelter.capacity
+
+shelter.capacity <- shelter.capacity %>% group_by(City)
+shelter.capacity <- shelter.capacity %>% summarize(mean_capacity = mean(summed_by_day_capacity)) #total avergage daily capacity per city
+head(shelter.capacity)
+```
+
+
+```{r}
+joined.df <- merge(shelter.capacity, population.df, by.x = "City", by.y = "City", all = FALSE) #new df merged by city: contains population and capacity
+joined.df$capacity.per.100k <- joined.df$mean_capacity * 100000 / joined.df$population #modified capacity to capacity per 100,000 city residents
+head(joined.df)
+```
+
+In order to determine whether the shelter capacity per 100k in both cities are the same, the t-test is run.
+
+$$ H_{0}: \mu_{Calgary\;capacity} - \mu_{Edmonton\;capacity}\leq0\;\;\;\;\;\;\;\;\; H_{a}: \mu_{Calgary\;capacity} - \mu_{Edmonton\;capacity}>0$$
+
+```{r}
+t.test(test.df[test.df$City=="Calgary", "summed_by_day_capacity"]/population.df[population.df$City=="Calgary", "population"], test.df[test.df$City=="Edmonton", "summed_by_day_capacity"]/population.df[population.df$City=="Edmonton", "population"], alternative="greater")
+
+```
+Conclusion: There is sufficient evidence that the density of homeless shelters capacity in Calgary exceeds that in Edmonton.
+
+Due to the above result, to determine the homelessness density the homeless shelters capacity cannot be used.
+Thus we proceed with admissions per 100,000 residents.
+
+```{r}
+shelter.admissions <- shelter.df %>% group_by(MONTH, DAY, City)
+shelter.admissions <- shelter.admissions %>% summarize(summed_by_day_admissions = sum(Overnight)) # adding shelter admissions by day for each city
+```
+
+
+```{r}
+shelter.admissions <- merge(shelter.admissions, population.df, by.x = "City", by.y = "City", all = FALSE) #joining shelter admission by day with population.df into data frame
+shelter.admissions$daily.admissions.per100k <- shelter.admissions$summed_by_day_admissions * 100000 / shelter.admissions$population #transforming shelter admission into shelter admission by day per 100,000 residents
+shelter.admissions$Date <- as.Date(paste("2021", shelter.admissions$MONTH, shelter.admissions$DAY, sep="-"), format="%Y-%m-%d") #formatting date of the last 
+```
+
+
+### Visual representation of the data
+
+Visual inspection of variation in time is presented on the time series graph.
+```{r}
+timeseries.df <- data.frame(
+  Date = shelter.admissions[shelter.admissions$City == "Edmonton", "Date"],
+  Edmonton = shelter.admissions[shelter.admissions$City == "Edmonton", "daily.admissions.per100k"],
+  Calgary = shelter.admissions[shelter.admissions$City == "Calgary", "daily.admissions.per100k"]
+)
+ggplot(timeseries.df, aes(x = Date)) +
+  geom_line(aes(y = Edmonton, colour = "Edmonton")) +
+  geom_line(aes(y = Calgary, colour = "Calgary")) +
+  scale_colour_manual("", 
+                      breaks = c("Edmonton", "Calgary"),
+                      values = c("red", "blue")) +
+  xlab("Date") +
+  ylab("Daily shelter admissions per 100k") +
+  ggtitle("Timeseries graph Edmonton and Calgary daily shelter admission rates")
+  
+
+
+```
+
+
+Visual analysis of the daily admission rates to homeless shelters in Calgary and Edmonton includes box-plots and histograms.
+
+```{r}
+Calgary.admissions <- shelter.admissions[shelter.admissions$City == "Calgary", "daily.admissions.per100k"]
+Edmonton.admissions <- shelter.admissions[shelter.admissions$City == "Edmonton", "daily.admissions.per100k"]
+
+```
+
+```{r}
+ggplot(shelter.admissions, aes(x = City, y = daily.admissions.per100k)) +
+  geom_boxplot(col = "darkred", fill = "lightblue") +
+  ylab("Daily shelter admissions per 100k") +
+  ggtitle("Boxplots of daily shelter admissions in Calgary and Edmonton per 100k") +
+  coord_flip()
+```
+
+The box for Edmonton is positioned to the left in comparison to the position of the Calgary box-plot, however it contains a large number of right outliers unlike the Calgary box-plot.
+It can be determined that the outliers are admissions during very cold spell of the winter weather in Edmonton, but the general admission rate to shelters in Edmonton is lower than in Calgary.
+
+
+
+
+```{r}
+dfCE=data.frame(Calgary.admissions, Edmonton.admissions )
+head(dfCE)
+```
+
+```{r}
+mean.Calgary.admissions <- mean(dfCE$Calgary.admissions)
+```
+
+```{r}
+mean.Edmonton.admissions <- mean(dfCE$Edmonton.admissions)
+```
+
+
+```{r}
+hist.df=data.frame(var=c(rep("Calgary",365), rep("Edmonton", 365)), value=c(dfCE$Calgary.admissions, dfCE$Edmonton.admissions))
+
+ggplot(hist.df, aes(x=value, fill=var)) + 
+  geom_histogram( color='#e9ecef', alpha=0.6, position='identity', binwidth = 3) +
+  xlab("Daily admissions rate per 100,000 residents") + 
+  ggtitle("Homeless shelter admissions") + 
+  geom_vline( xintercept = mean.Calgary.admissions, col="red") + 
+  geom_vline(xintercept=mean.Edmonton.admissions, col="blue")
+```
+The joined histogram graph shows shift in distributions as well as means distant from each other for both data sets. Moreover, the position of the means (vertical lines) to the right from the  modal interval indicates skewness to the right in both cases. This is an expected result as the admission to shelters has its peaks during cold winter nights which count is not extremely large on an annual scale.
+
+
+
+### Statistical test for equality of mean daily shelter admission rates in Calgary and Edmonton
+
+#### Classical t-Tests
+
+
+Statistical hypotheses:
+$$
+H_{0}: \mu_{Calgary} \leq\; \mu_{Edmonton}\;\;\;\;\;\;\;\;\; H_{a}: \mu_{Calgary} > \mu_{Edmonton}
+$$
+or equivalently:
+$$ H_{0}: \mu_{Calgary} - \mu_{Edmonton}\leq0\;\;\;\;\;\;\;\;\; H_{1}: \mu_{Calgary} - \mu_{Edmonton}>0$$
+Two data sets considered for statistical testing comprise of 365 observations each. Such large data sets allow for loosening the requirement of normality of the distribution of each data set. Both data sets display considerable deviation from normality, as expressed on the normal probability quantile plots below. Further statistical test would be required to determine whether this deviation from normality is significant. We will not perform such tests due dealing with large samples.
+The t-test will be performed for samples of 50 observations each.
+
+```{r}
+ggplot(data.frame(Calgary.admissions), aes(sample = Calgary.admissions)) +
+  stat_qq(col = "darkred") +
+  stat_qq_line(col = "darkgreen") +
+  ggtitle("QQ-plot of daily shelter admissions per 100k in Calgary")
+```
+
+
+```{r}
+ggplot(data.frame(Edmonton.admissions), aes(sample = Edmonton.admissions)) +
+  stat_qq(col = "darkred") +
+  stat_qq_line(col = "darkgreen") +
+  ggtitle("QQ-plot of daily shelter admissions per 100k in Edmonton")
+```
+
+
+We will use the t test with the test statistic for two different, unknown variances. Since both samples come from populations that appear to be not normally distributed, we cannot conduct the F-test for equality of variances to determine whether we could use the t-test with equal variances.
+
+$$t=\frac{((x_{Calgary}-x_{Edmonton})-(\mu_{Calgary} - \mu_{Edmonton}))}{\sqrt{\frac{(s_{1}^2)}{n_{1}}+\frac{(s_{2}^2)}{n_{2}}}}$$
+with the degrees of freedom determined as follows
+$$ df=\frac{(A+B)^2}{\sqrt{\frac{1}{n_{1}-1}A+\frac{1}{n_{2}-1}B}}$$
+where 
+$ A=\frac{s_{1}^2}{n_{1}}$  and $B=\frac{s_{2}^2}{n_{2}}$
+
+Assumed the significance level $\alpha=0.05$.
+```{r}
+Calgary.sample <- sample(Calgary.admissions, 50, replace = FALSE)
+Edmonton.sample <- sample(Edmonton.admissions, 50, replace = FALSE)
+
+t.test(Calgary.sample, Edmonton.sample, conf.level = .95, var.equal = FALSE, paired = FALSE, alternative = "greater")
+```
+The $p-value=5.105e-08\approx0$ is the probability of obtaining the value of the test statistic at least as extreme as the obtained  $t=5.8809$ under the assumption of the null hypothesis being true. Since such rare value has occurred we conclude that the assumption of the null hypothesis being true must be wrong. We reject the null hypothesis in favor of the alternative hypothesis that the $\mu_{Calgary} > \mu_{Edmonton}$ - the mean daily admission rate to homeless shelters per 100,000 residents in Calgary is greater than the mean daily admission rate to homeless shelters per 100,000 residents in Calgary.
+
+Confidence interval:
+```{r}
+t.test(Calgary.sample, Edmonton.sample, conf.level = .95, var.equal = FALSE, paired = FALSE, alternative = "two.sided")$conf
+```
+With confidence 95% the difference in population means of the daily admission rates per 100k in Calgary and Edmonton, 
+$\mu_{Calgary} - \mu_{Edmonton}$ is between the above values.
+
+
+Encouraged by this result and the p-value very low, we attempt to capture the true population difference in the mean daily admission rates for Edmonton and Calgary. At the significance level $\alpha=0.05$ we determined that the largest difference would be $\mu_{Calgary} - \mu_{Edmonton}>a$ stated below in the null hypothesis.
+The test was run under the following hypotheses:
+
+$$ H_{0}: \mu_{Calgary} - \mu_{Edmonton}\leq a\;\;\;\;\;\;\;\;\; H_{1}: \mu_{Calgary} - \mu_{Edmonton}>a$$
+```{r}
+t.test(Calgary.sample, Edmonton.sample, conf.level = .95, var.equal = FALSE, paired = FALSE, alternative = "greater", mu=11.4)
+```
+For te particular sample we worked with the value $a$ was 11.4.
+
+In conclusion, at the significance level $\alpha=0.05$, the mean daily admission to homeless shelters per 100k residents in Calgary is at least by 8 admissions higher than in Edmonton, Which is approximately at least 10% higher than in Edmonton.
+
+
+#### The Permutation Test
+For comparison with the t-test performed the permutation test. The permutation test considers no assumptions about the population distributions. Its performance depends on whether the sample in representative of the population.  
+
+As in the previous section, we will test the following hypotheses:
+
+$$ H_{0}: \mu_{Calgary} - \mu_{Edmonton}\leq0\;\;\;\;\;\;\;\;\; H_{a}: \mu_{Calgary} - \mu_{Edmonton}>0$$
+Under the assumption of the null hypothesis being true we will determine the bootstrap distribution of the difference in sample means, by conducting the procedure of choosing different combination of observations for each of the sample means N=2000 times. EAch sample comprises of 50 observations.
+
+
+```{r}
+diffmeans=favstats(Calgary.sample)$mean-favstats(Edmonton.sample)$mean
+
+```
+
+
+The difference in sample means  $\bar x_{Calgary}-\bar x_{Edmonton} equals to
+```{r}
+diffmeans
+```
+
+
+```{r}
+admissions=c(Calgary.sample, Edmonton.sample)
+city=c(rep("Calgary",50), rep("Edmonton", 50))
+twosample.df=data.frame(city, admissions)
+head(twosample.df,3)
+tail(twosample.df,3)
+```
+```{r}
+N=2000
+meandiff=numeric(N)
+for (i in 1:N){
+  index=sample(100,50, replace=FALSE)
+  meandiff[i]=mean(twosample.df$admissions[index])-mean(twosample.df$admissions[-index])
+}
+```
+
+```{r}
+hist(meandiff, xlab="Difference Between Calgary mean and Edmonton mean", ylab="Frequency", main="Outcome of 2000 Permutation Tests", col='blue', xlim = range(-10:15))
+abline(v = diffmeans, col="red")
+
+```
+```{r}
+p.val=(sum(meandiff>=diffmeans))/N
+p.val
+```
+
+The $p-value=0.00$ therefore there is evidence to reject the null hypothesis in favor of the alternative that  $\mu_{Calgary} - \mu_{Edmonton}>0$.
+The mean daily admission rate to shelters in Calgary per 100k residents is greater that the same for Edmonton.
+
+
+
+
+## 2.Weather and homeless shelter occupancy rate
+
+Comparative analysis of correlation and regression of homeless shelters occupancy rate and  minimum daily temperature in Calgary in four consecutive winters from 2018 to 2022.
+
+### Data collection, preparation, and analysis
+Data were collected for four winter seasons, 2018-19, 2019-20, 2020-21, 2021-22 each for the months from October to March.
+Daily occupancy rate for shelter in Calgary was calculated by dividing total daily admissions in Calgary by total daily capacity.
+
+
+
+```{r}
+shelter.df <- read.csv("data/shelter_data.csv")
+shelter.df <- shelter.df[shelter.df$City == "Calgary",]
+```
+
+```{r}
+prepare_winter_data <- function(df, year) {
+  df <- df[
+    ((df$YEAR == year) & (df$MONTH %in% c(10, 11, 12))) | 
+    ((df$YEAR == year + 1) & (df$MONTH %in% c( 1,  2,  3))),
+    c("YEAR", "MONTH", "Overnight", "Capacity", "Date")
+  ]
+  df <- df[!is.na(df$Capacity), ]
+  df <- df[df$Capacity > 0, ]
+  #df$Date <- as.Date(df$Date, format = "%m/%d/%Y")
+  df$DAY <- format(as.Date(df$Date, format="%m/%d/%Y"), format = "%d")
+  df$DAY <- as.integer(df$DAY)
+  
+  return(df)
+}
+```
+
+```{r}
+shelter.df.2018 <- prepare_winter_data(shelter.df, 2018)
+shelter.df.2019 <- prepare_winter_data(shelter.df, 2019)
+shelter.df.2020 <- prepare_winter_data(shelter.df, 2020)
+shelter.df.2021 <- prepare_winter_data(shelter.df, 2021)
+```
+
+```{r}
+head(shelter.df.2018)
+```
+
+```{r}
+generate_occupancy_rate <- function(df) {
+  df <- df %>% group_by(YEAR, MONTH, DAY)
+  df <- df %>% summarize(summed_by_day_admissions = sum(Overnight), summed_by_day_capacity = sum(Capacity))
+  df$Occupancy.Rate <- df$summed_by_day_admissions / df$summed_by_day_capacity
+
+  return(df)
+}
+```
+
+```{r}
+shelter.admissions.2018 <- generate_occupancy_rate(shelter.df.2018)
+shelter.admissions.2019 <- generate_occupancy_rate(shelter.df.2019)
+shelter.admissions.2020 <- generate_occupancy_rate(shelter.df.2020)
+shelter.admissions.2021 <- generate_occupancy_rate(shelter.df.2021)
+```
+
+```{r}
+head(shelter.admissions.2018,3)
+```
+
+The weather data (minimum daily temeprature) were collected on daily basis from a location in Calgary for each season from October 1 to March 31. 
+
+```{r}
+prepare_weather_data <- function(df, year) {
+  df <- read.csv("data/weather_data_calgary.csv")
+  df <- df[
+    (df["Date"] >= paste(year, "-10-01", sep = "")) & 
+    (df["Date"] < paste(year + 1, "-04-01", sep = "")) &
+    (df["Township"] == "T023R01W5"),
+    c("Date", "Air.Temp..Min....C.")
+  ]
+  names(df) <- c("Date", "Min.Temp.C")
+  
+  return(df)
+}
+
+```
+
+
+```{r}
+weather.df.2018 <- prepare_weather_data(calgary.weather.df, 2018)
+weather.df.2019 <- prepare_weather_data(calgary.weather.df, 2019)
+weather.df.2020 <- prepare_weather_data(calgary.weather.df, 2020)
+weather.df.2021 <- prepare_weather_data(calgary.weather.df, 2021)
+```
+
+
+```{r}
+add_date_columns <- function(df) {
+  df$DAY <- format(as.Date(df$Date, format="%Y-%m-%d"), format = "%d")
+  df$DAY <- as.integer(df$DAY)
+  
+  df$MONTH <- format(as.Date(df$Date, format="%Y-%m-%d"), format = "%m")
+  df$MONTH <- as.integer(df$MONTH)
+  
+  df$YEAR <- format(as.Date(df$Date, format="%Y-%m-%d"), format = "%Y")
+  df$YEAR <- as.integer(df$YEAR)
+
+  return(df)
+}
+```
+
+```{r}
+weather.df.2018 <- add_date_columns(weather.df.2018)
+weather.df.2019 <- add_date_columns(weather.df.2019)
+weather.df.2020 <- add_date_columns(weather.df.2020)
+weather.df.2021 <- add_date_columns(weather.df.2021)
+```
+
+Created a new data frame containg both, shelter occupancy rate and the minimum daily temperature.
+```{r}
+library(stringr)
+join_shelter_and_weather <- function(shelter.df, weather.df) {
+  joined.df <- merge(shelter.df, weather.df, by = c("YEAR", "MONTH", "DAY"), all = FALSE)
+  joined.df$Date1 <- ifelse(
+    joined.df$MONTH %in% c(10, 11, 12), 
+    paste("2000", str_pad(joined.df$MONTH, 2, pad = "0"), str_pad(joined.df$DAY, 2, pad = "0"), sep="-"), 
+    paste("2001", str_pad(joined.df$MONTH, 2, pad = "0"), str_pad(joined.df$DAY, 2, pad = "0"), sep="-")
+  )
+  joined.df$Date1 <- as.Date(joined.df$Date1, format = "%Y-%m-%d")
+  
+  return(joined.df)
+}
+```
+
+```{r}
+joined.df.2018 <- join_shelter_and_weather(shelter.admissions.2018, weather.df.2018)
+joined.df.2019 <- join_shelter_and_weather(shelter.admissions.2019, weather.df.2019)
+joined.df.2020 <- join_shelter_and_weather(shelter.admissions.2020, weather.df.2020)
+joined.df.2021 <- join_shelter_and_weather(shelter.admissions.2021, weather.df.2021)
+```
+```{r}
+joined.df.2018
+```
+
+### Visual analysis
+
+Initially the scatter-plots of the minimum temperature and the occupancy rate for each season were created in one figure.
+```{r}
+ggplot(mapping = aes(x = Min.Temp.C, y = Occupancy.Rate)) +
+  geom_point(data = joined.df.2018, mapping = aes(colour = "2018-2019"), show.legend = T) +
+  geom_point(data = joined.df.2019, mapping = aes(colour = "2019-2020"), show.legend = T) +
+  geom_point(data = joined.df.2020, mapping = aes(colour = "2020-2021"), show.legend = T) +
+  geom_point(data = joined.df.2021, mapping = aes(colour = "2021-2022"), show.legend = T) +
+  scale_colour_manual(name = 'Legend', 
+                      guide = 'legend',
+                      values = c("2018-2019" = "red",
+                                 "2019-2020" = "blue",
+                                 "2020-2021" = "green",
+                                 "2021-2022" = "black"), 
+                      labels = c("2018-2019", "2019-2020", "2020-2021", "2021-2022")) +
+  ggtitle("Scatterplot of Min Temperature and Occupancy Rate")
+  
+```
+Box-plots were created to visualize differences in the distributions of occupancy rates and in the minimum temperature.
+```{r}
+joined.df.2018$label <- "2018-2019"
+joined.df.2019$label <- "2019-2020"
+joined.df.2020$label <- "2020-2021"
+joined.df.2021$label <- "2021-2022"
+
+combined.df <- rbind(joined.df.2018, joined.df.2019, joined.df.2020, joined.df.2021)
+
+ggplot(combined.df, mapping = aes(x = label, y = Occupancy.Rate)) +
+  geom_boxplot(col = "darkred") +
+  labs(x = "Winter Season", y = "Occupancy Rate")+
+  ggtitle("Boxplots of Occupancy Rate in Winter Seasons")
+```
+Across the four seasons there appear to be differences in occupancy rate with deviation among medians. Spread of the the distributions is comparable with the exception of the season 2020-21". The season "2021-22" contains the most outliers.
+```{r}
+ggplot(combined.df, mapping = aes(x = label, y = Min.Temp.C)) +
+  geom_boxplot(col = "darkred") +
+  labs(x = "Minimal Temperature in C", y = "Min Temperature") +
+  ggtitle("Boxplots of Minimum Temperature in Winter Seasons")
+```
+The distributions of minimum daily temperatures appear to be similar across the season. Based on the outliers in the the seasons "2019-2020" and "2020-2021", it can be concluded that those winters were relatively warmer with low temperatures being outliers.
+
+```{r warning=FALSE}
+ggplot() +
+  geom_line(data = joined.df.2018, mapping = aes(x = Date1, y = Occupancy.Rate, colour = "2018-2019")) +
+  geom_line(data = joined.df.2019, mapping = aes(x = Date1, y = Occupancy.Rate, colour = "2019-2020")) +
+  geom_line(data = joined.df.2020, mapping = aes(x = Date1, y = Occupancy.Rate, colour = "2020-2021")) +
+  geom_line(data = joined.df.2021, mapping = aes(x = Date1, y = Occupancy.Rate, colour = "2021-2022")) +
+  scale_colour_manual("", 
+                      breaks = c("2018-2019", "2019-2020", "2020-2021", "2021-2022"),
+                      values = c("red", "blue", "green", "black")) +
+  xlab("Date") +
+  ylab("Daily shelter occupancy") +
+  ggtitle("Time series graph of daily shelter occupancy rate in Calgary")
+```
+Based on the time series graph, the outliers in the "2021-2022" season are related to the above normal occupancy rates around October 2021 and below normal occupancy rates around March 2022.
+For the predominant part of the "2020-2021" season the occupancy rates appear to be lower. This is the time of the COVID-19 pandemic.
+Due to COVID-19 pandemic additional shelters were opened. This might have impacted the occupancy rate values for "2020-2021" and "2021-2022".
+
+
+
+```{r}
+p2018 <- ggplot(joined.df.2018, aes(x = Min.Temp.C, y = Occupancy.Rate)) +
+  geom_point(col = "darkred") +
+  xlab("Minimal Temperature in Centigrade") +
+  ylab("Occupancy Rate") +
+  geom_smooth(method = "lm") +
+  ggtitle("2018")
+
+p2019 <- ggplot(joined.df.2019, aes(x = Min.Temp.C, y = Occupancy.Rate)) +
+  geom_point(col = "darkred") +
+  xlab("Minimal Temperature in Centigrade") +
+  ylab("Occupancy Rate") +
+  geom_smooth(method = "lm") +
+  ggtitle("2019")
+
+p2020 <- ggplot(joined.df.2020, aes(x = Min.Temp.C, y = Occupancy.Rate)) +
+  geom_point(col = "darkred") +
+  xlab("Minimal Temperature in Centigrade") +
+  ylab("Occupancy Rate") +
+  geom_smooth(method = "lm") +
+  ggtitle("2020")
+
+p2021 <- ggplot(joined.df.2021, aes(x = Min.Temp.C, y = Occupancy.Rate)) +
+  geom_point(col = "darkred") +
+  xlab("Minimal Temperature in Centigrade") +
+  ylab("Occupancy Rate") +
+  geom_smooth(method = "lm") +
+  ggtitle("2021")
+```
+
+```{r}
+p2018 + p2019 + p2020 + p2021 + plot_annotation(title = "Air Temperature and Shelters Occupancy Rate in Calgary")
+```
+Separate scatter-plots for the seasons expose the difference between correlation and regressions lines, particularly showing the outstanding situation in the "2021-2022" season. For the remaining seasons the negative correlation is more observable.
+
+### Analysis of linear models
+
+#### Analysis or residuals
+
+```{r}
+occupancy.weather.model.2018 <- lm(Occupancy.Rate ~ Min.Temp.C, data = joined.df.2018)
+occupancy.weather.model.2019 <- lm(Occupancy.Rate ~ Min.Temp.C, data = joined.df.2019)
+occupancy.weather.model.2020 <- lm(Occupancy.Rate ~ Min.Temp.C, data = joined.df.2020)
+occupancy.weather.model.2021 <- lm(Occupancy.Rate ~ Min.Temp.C, data = joined.df.2021)
+```
+
+
+```{r}
+diagnostics.df <- data.frame(
+  residuals = occupancy.weather.model.2018$residuals,
+  pdarkred.values = occupancy.weather.model.2018$fitted.values
+)
+
+ggplot(diagnostics.df, aes(sample = residuals)) +
+  stat_qq(col = "darkred") +
+  stat_qq_line(col = "darkgreen") +
+  ggtitle("Check for Normal Distribution of Residuals, 2018-2019")
+
+ggplot(diagnostics.df, aes(x = pdarkred.values, y = residuals)) +
+  geom_point(col = "darkblue", size = 2, position = "jitter") +
+  geom_hline(yintercept = 0, color = "darkred", linetype = "dashed") +
+  xlab("Predicted Values") +
+  ylab("Residuals") + 
+  ggtitle("Fit of residuals for the regression, 2018-2019")
+```
+
+```{r}
+diagnostics.df <- data.frame(
+  residuals = occupancy.weather.model.2019$residuals,
+  pdarkred.values = occupancy.weather.model.2019$fitted.values
+)
+
+ggplot(diagnostics.df, aes(sample = residuals)) +
+  stat_qq(col = "darkred") +
+  stat_qq_line(col = "darkgreen") +
+  ggtitle("Check for Normal Distribution of Residuals, 2019-2020")
+
+ggplot(diagnostics.df, aes(x = pdarkred.values, y = residuals)) +
+  geom_point(col = "darkblue", size = 2, position = "jitter") +
+  geom_hline(yintercept = 0, color = "darkred", linetype = "dashed") +
+  xlab("Predicted Values") +
+  ylab("Residuals") + 
+  ggtitle("Fit of residuals for the regression, 2019-2020")
+```
+
+```{r}
+diagnostics.df <- data.frame(
+  residuals = occupancy.weather.model.2020$residuals,
+  pdarkred.values = occupancy.weather.model.2020$fitted.values
+)
+
+ggplot(diagnostics.df, aes(sample = residuals)) +
+  stat_qq(col = "darkred") +
+  stat_qq_line(col = "darkgreen") +
+  ggtitle("Check for Normal Distribution of Residuals, 2020-2021")
+
+ggplot(diagnostics.df, aes(x = pdarkred.values, y = residuals)) +
+  geom_point(col = "darkblue", size = 2, position = "jitter") +
+  geom_hline(yintercept = 0, color = "darkred", linetype = "dashed") +
+  xlab("Predicted Values") +
+  ylab("Residuals") + 
+  ggtitle("Fit of residuals for the regression, 2020-2021")
+```
+
+```{r}
+diagnostics.df <- data.frame(
+  residuals = occupancy.weather.model.2021$residuals,
+  pdarkred.values = occupancy.weather.model.2021$fitted.values
+)
+
+ggplot(diagnostics.df, aes(sample = residuals)) +
+  stat_qq(col = "darkred") +
+  stat_qq_line(col = "darkgreen") +
+  ggtitle("Check for Normal Distribution of Residuals, 2021-2022")
+
+ggplot(diagnostics.df, aes(x = pdarkred.values, y = residuals)) +
+  geom_point(col = "darkblue", size = 2, position = "jitter") +
+  geom_hline(yintercept = 0, color = "darkred", linetype = "dashed") +
+  xlab("Predicted Values") +
+  ylab("Residuals") + 
+  ggtitle("Fit of residuals for the regression, 2021-2022")
+```
+The conditions of homoscedasticity and normality of the distribution of residuals appear to be satisfied for the first three seasons. However, in the "2021-2022" winter normality of the residual distribution appears not to be satisfied due to extraordinary values in the left and right tails. There appears to be heteroscedasticity. Further invesigation using statistical tests is needed to confirm these findings.
+
+#### Correlation analysis
+
+```{r}
+correlation.2018 <- cor.test(
+  joined.df.2018$Min.Temp.C, 
+  joined.df.2018$Occupancy.Rate, 
+  alternative = "less",
+  method = "pearson",
+  conf.level = .95
+)
+
+correlation.2019 <- cor.test(
+  joined.df.2019$Min.Temp.C, 
+  joined.df.2019$Occupancy.Rate, 
+  alternative = "less",
+  method = "pearson",
+  conf.level = .95
+)
+
+correlation.2020 <- cor.test(
+  joined.df.2020$Min.Temp.C,
+  joined.df.2020$Occupancy.Rate, 
+  alternative = "less",
+  method = "pearson",
+  conf.level = .95
+)
+
+correlation.2021 <- cor.test(
+  joined.df.2021$Min.Temp.C, 
+  joined.df.2021$Occupancy.Rate, 
+  alternative = "less",
+  method = "pearson",
+  conf.level = .95
+)
+```
+
+```{r}
+cor_coef <- c(
+  correlation.2018$estimate, 
+  correlation.2019$estimate, 
+  correlation.2020$estimate, 
+  correlation.2021$estimate
+)
+
+cor_ci <- c(
+  correlation.2018$conf.int, 
+  correlation.2019$conf.int, 
+  correlation.2020$conf.int, 
+  correlation.2021$conf.int
+)
+cor_ci <- t(matrix(cor_ci, nrow = 2))
+rownames(cor_ci) <- c("2018", "2019", "2020", "2021")
+colnames(cor_ci) <- c("lower_bound", "upper_bound")
+
+cor_pvals <- c(
+  correlation.2018$p.value, 
+  correlation.2019$p.value, 
+  correlation.2020$p.value, 
+  correlation.2021$p.value
+)
+```
+
+```{r}
+Nsim <- 2000
+boot_vect.2018 <- numeric(Nsim)
+boot_vect.2019 <- numeric(Nsim)
+boot_vect.2020 <- numeric(Nsim)
+boot_vect.2021 <- numeric(Nsim)
+
+for(i in 1:Nsim) {
+  val.2018 <- sample(joined.df.2018, replace = TRUE)
+  boot_vect.2018[i] <- cor(val.2018$Min.Temp.C, val.2018$Occupancy.Rate)
+  
+  val.2019 <- sample(joined.df.2019, replace = TRUE)
+  boot_vect.2019[i] <- cor(val.2019$Min.Temp.C, val.2019$Occupancy.Rate)
+  
+  val.2020 <- sample(joined.df.2020, replace = TRUE)
+  boot_vect.2020[i] <- cor(val.2020$Min.Temp.C, val.2020$Occupancy.Rate)
+  
+  val.2021 <- sample(joined.df.2021, replace = TRUE)
+  boot_vect.2021[i] <- cor(val.2021$Min.Temp.C, val.2021$Occupancy.Rate)
+}
+```
+
+```{r}
+bootstrap.cor.ci <- c(
+  quantile(boot_vect.2018, .95),
+  quantile(boot_vect.2019, .95),
+  quantile(boot_vect.2020, .95),
+  quantile(boot_vect.2021, .95)
+)
+
+bootstrap.cor.ci <- matrix(c(rep(-1, 4), bootstrap.cor.ci), nrow = 4)
+rownames(bootstrap.cor.ci) <- c("2018", "2019", "2020", "2021")
+colnames(bootstrap.cor.ci) <- c("lower_bound", "upper_bound")
+```
+
+```{r}
+data.frame(
+  YEAR = c(2018, 2019, 2020, 2021),
+  Computed.Correlation = cor_coef,
+  Cor.Test.P.Value = cor_pvals,
+  Cor.Test.CI = cor_ci,
+  Cor.Bootstrap.CI = bootstrap.cor.ci
+)
+```
+The above table summarizes the results of correlation analysis for each of the four periods. Correlation coefficient estimate as well as confidence intervals obtained using Pearson correlation statistics and bootstrapping method are displayed in the table.
+Based on the p-values, the correlation coefficients are significantly less than zero for the first three seasons, whereas there is no sufficient evidence to reject the hypothesis that the correlation coefficient is zero in the fourth case.
+
+The above findings are confirmed by the confidence intervals. Even though the bootstrap confidence interval for "2021-2020" does not capture zero, its right bound is at the close proximity to zero while its classic counterpart contains zero. 
+
+For the prediction purposes the data from the first three seasons would be more appropriate as the fourth season seems to be exceptionally different from the others. A statistical test may be conducted to compare the slopes and intercepts which is beyond the scope of this project.
+
+#### Combined linear regression model
+
+```{r}
+combined.correct.df <- combined.df[combined.df$label != "2021-2022",]
+combined.correct.df
+```
+```{r}
+ggplot(combined.correct.df, aes(x = Min.Temp.C, y = Occupancy.Rate)) +
+  geom_point(mapping = aes(colour = "Winter"), show.legend = T) +
+  scale_colour_manual(name = 'Legend', 
+                      guide = 'legend',
+                      values = c("Winter" = "black"), 
+                      labels = c("Winter")) +
+  geom_smooth(method = "lm") +
+  ggtitle("Scatterplot of Min Temperature and Occupancy Rate")
+  
+```
+
+
+```{r}
+combined.model <- lm(Occupancy.Rate ~ Min.Temp.C, data = combined.correct.df)
+```
+
+```{r}
+summary(combined.model)
+confint(combined.model, conf.level=0.95)
+cat("\n\n Confidence interval for the predicted value | min.temp.=-30\n")
+predict(combined.model, newdata=data.frame(Min.Temp.C = -30), interval="predict")
+cat("\n Confidence interval for the predicted mean value | min.temp.=-30\n")
+predict(combined.model, newdata=data.frame(Min.Temp.C = -30), interval="conf")
+```
+
+Based on the results of the above summary:
+
+1. Both the intercept and slope are statistically significant because the  p-values respective t-test are practically zero.
+
+2. The result of the F-test confirms that the model is linear with the slope different than zero (p-value practically zero).
+
+3. There is significant variation in the residuals leading to only 17.64% of the overall variance being explained by the model. In conjunction with the statistical significance of the model, this outcome implies that there likely are other factors than the minimum daily temperature that influence the occupancy rates in the winter.
+
+4. With confidence 95% the population parameters are as follows: the slope - $-0.0025<B<-0.0017$ and the y-intercept $0.6999<A<0.7093 $.
+
+5. For the minimum temperature (chosen arbitrarily) of -30 degrees Celsius, the 95% confidence interval for predicted value $\hat y$ is $0.6947<\hat y <0.8403$, and the 95% prediction interval for the mean value of prediction is $0.7590<\mu_{y}<0.7760$.
+
+
+In this project two topics were analyzed: the comparison of homelessness situation between Calgary and Edmonton and the influence of winter weather minimum temperatures on occupancy rates in homeless shelters in Calgary. It was determined that the homelessness is more prevalent in Calgary than in Edmonton, based on the means of daily admissions per 100,000 city residents. Also, the shelter capacity is disproportionately higher in Calgary than in Edmonton.
+Moreover, In the years prior to pandemic, the winter occupancy rates are significantly negatively dependent on the temperature. However, in the "pandemic" winter season "2021-2022" this dependence significantly minimized. 
+In the combined model using data from the first three seasons, despite strong statistical significance of the linear model, the coefficient of determination indicates that only 17.64% of the variation in the data is explained by this model. This is an indicator of possible other factors having impact on daily occupancy rates in homeless shelter in Calgary in the winter.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
